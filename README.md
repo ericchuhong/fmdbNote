@@ -77,3 +77,125 @@ fmdb的学习摘要
 - dataNoCopyForColumn:
 - UTF8StringForColumnName:
 - objectForColumnName:
+
+上面的这些方法每一个都有与之相对应的根据索引获取数据的方法 ：
+
+    {type}ForColumnIndex:
+
+上面这些方法则是根据列的名字：
+
+
+    {type}ForColumn:(name)
+
+
+    FMResultSet *resultSet = [self.db execute Query:@“select * from t_student;”];
+    
+     //根据条件查询
+    FMResultSet *resultSet = [self.db executeQuery:@“select * from t_student where id<?;”@(14)];
+    
+     //遍历结果集合   
+    
+    while ([resultSet  next])
+    
+       {
+    int idNum = [resultSet intForColumn:@“id”]；
+    
+    NSString *name = [resultSet
+    objectForColumn:@“name”];
+    
+    int age = [resultSet intForColumn:@“age”];
+      }
+
+## 事务
+
+FMDatabase可以通过调用开始/结束事务的方法来实现批量语句操作。
+
+## 多语句和批量操作
+使用 FMDatabase的 **executeStatements:withResultBlock:**
+
+    NSString *sql = @"create table bulktest1 (id integer primary key autoincrement, x text);"
+     "create table bulktest2 (id integer primary key autoincrement, y text);"
+     "create table bulktest3 (id integer primary key autoincrement, z text);"
+     "insert into bulktest1 (x) values ('XXX');"
+     "insert into bulktest2 (y) values ('YYY');"
+     "insert into bulktest3 (z) values ('ZZZ');";
+    
+    success = [db executeStatements:sql];
+    
+    sql = @"select count(*) as count from bulktest1;"
+       "select count(*) as count from bulktest2;"
+       "select count(*) as count from bulktest3;";
+    
+    success = [self.db executeStatements:sql withResultBlock:^int(NSDictionary *dictionary) {
+    NSInteger count = [dictionary[@"count"] integerValue];
+    XCTAssertEqual(count, 1, @"expected one record for dictionary %@", dictionary);
+    return 0;
+    }];
+
+## 数据清洗
+当时用SQL语句时，如果还没有插入数据时，不要去执行清洗数据。
+
+
+    INSERT INTO myTable VALUES (?, ?, ?, ?)
+
+？ 问号是一个占位符，会被后面的值或对象代替。这个方法可以接收许多不同类型的参数（NSArray, NSDictionary, or 或者va_list），这些参数都会被自动专业为需要的值 。
+
+> NSInteger 之类的变量应该 转化为 NSNumber 对象，可以在前面 加上 “@” 或者使用方法  [NSNumber numberWithInt:identifier]  转换
+> 相同的 插入NULL值得话也需要转化成 Objecttive - C对象 [NSNull null]  。可以使用 comment ?: [NSNull null] 语法，来插入一个字符串
+
+另外，我们可以使用命名好的参数语法
+
+    INSERT INTO authors (identifier, name, date, comment) VALUES (:identifier, :name, :date, :comment)
+
+参数必须以 冒号“：”为前缀，所以字典的key 不要带有前缀
+
+    NSDictionary *arguments = @{@"identifier": @(identifier), @"name": name, @"date": date, @"comment": comment ?: [NSNull null]};
+    BOOL success = [db executeUpdate:@"INSERT INTO authors (identifier, name, date, comment) VALUES (:identifier, :name, :date, :comment)" withParameterDictionary:arguments];
+    if (!success) {
+    NSLog(@"error = %@", [db lastErrorMessage]);
+    }
+
+---
+
+## 使用 FMDatabaseQueue 与 线程安全
+
+如果在多线程里面为去创建一个FMDatabase 对象是很糟糕的选择，可能会造成你的内存爆炸或者让你的Mac 直接宕机。
+> 所以请不要创建一个 FMDatabase 对象之后再多线程中使用它
+
+我们可以使用FMDataseQueue 到多线程中。它会同步和协调多线程的访问。
+
+###使用 
+
+    FMDatabaseQueue *queue = [FMDatabaseQueue databaseQueueWithPath:aPath];
+    [queue inDatabase:^(FMDatabase *db) {
+    [db executeUpdate:@"INSERT INTO myTable VALUES (?)", @1];
+    [db executeUpdate:@"INSERT INTO myTable VALUES (?)", @2];
+    [db executeUpdate:@"INSERT INTO myTable VALUES (?)", @3];
+    
+    FMResultSet *rs = [db executeQuery:@"select * from foo"];
+    while ([rs next]) {
+    …
+    }
+    }];
+
+也可以把代码包装起来，传到FMDatabaseQueue的事务处理块中
+
+    [queue inTransaction:^(FMDatabase *db, BOOL *rollback) {
+    [db executeUpdate:@"INSERT INTO myTable VALUES (?)", @1];
+    [db executeUpdate:@"INSERT INTO myTable VALUES (?)", @2];
+    [db executeUpdate:@"INSERT INTO myTable VALUES (?)", @3];
+    
+    if (whoopsSomethingWrongHappened) {
+    *rollback = YES;
+    return;
+    }
+    // etc…
+    [db executeUpdate:@"INSERT INTO myTable VALUES (?)", @4];
+    }];
+
+## 自定义 基于 blocks的sqlite方法
+> 参考 在 main.m 的方法 **-makeFunctionNamed:**
+
+摘要就到这里结束了 
+
+--2016年1月14日
